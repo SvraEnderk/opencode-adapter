@@ -1,0 +1,20 @@
+#oc-adapter-panel[hidden] { display: none !important; }
+#oc-adapter-panel {
+    border: 1px solid var(--SmartThemeBorderColor, #555);
+    border-radius: 8px;
+    padding: 10px;
+    margin: 8px 0;
+    font-size: 0.9em;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+.oc-adapter-title { font-weight: 600; }
+.oc-adapter-title small { opacity: 0.65; font-weight: 400; }
+.oc-adapter-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.oc-adapter-controls select { flex: 1; min-width: 110px; margin: 0; }
+.oc-adapter-controls button { margin: 0; white-space: nowrap; }
+#oc-adapter-status[data-state="success"] { color: #8fd5a6; }
+#oc-adapter-status[data-state="error"] { color: #f0a5a5; }
+#oc-adapter-model-info, #oc-adapter-panel > small { opacity: 0.8; line-height: 1.5; }
+#oc-adapter-session-info { overflow-wrap: anywhere; font-size: 0.9em; opacity: 0.85; }
