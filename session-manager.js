@@ -20,11 +20,11 @@ function sameScope(a, b) {
     return !!a && !!b && a.kind === b.kind && a.owner === b.owner && a.chat === b.chat;
 }
 
-export function createSessionManager({ uuid = () => crypto.randomUUID() } = {}) {
+export function createSessionManager({ uuid = () => crypto.randomUUID(), key = SESSION_KEY } = {}) {
     const temporary = () => `oc-st-${uuid()}`;
     const temporaryChats = new WeakMap();
     function current(context) {
-        const record = context?.chatMetadata?.[SESSION_KEY];
+        const record = context?.chatMetadata?.[key];
         return record?.version === 1 && validSessionId(record.id)
             && sameScope(record.scope, chatScope(context)) ? record : null;
     }
@@ -46,12 +46,12 @@ export function createSessionManager({ uuid = () => crypto.randomUUID() } = {}) 
             if (existing) return { id: existing.id, persistent: true, changed: false };
             // Branches copy metadata. A different chat filename must receive a new ID.
             const record = { version: 1, id: temporary(), scope };
-            context.chatMetadata[SESSION_KEY] = record;
+            context.chatMetadata[key] = record;
             return { id: record.id, persistent: true, changed: true };
         },
         renamed(context, event) {
             const scope = chatScope(context);
-            const record = context?.chatMetadata?.[SESSION_KEY];
+            const record = context?.chatMetadata?.[key];
             if (!scope || record?.version !== 1 || !validSessionId(record.id)) return false;
             const oldName = String(event?.oldFileName ?? '').replace(/\.jsonl$/i, '');
             const owner = scope.kind === 'group' ? String(event?.groupId ?? '') : event?.avatarId;

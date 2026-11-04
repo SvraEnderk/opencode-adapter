@@ -7,6 +7,7 @@ import { getContext } from '/scripts/st-context.js';
 import { yaml } from '/lib.js';
 import { createSessionManager, REQUEST_SESSION_KEY } from './session-manager.js';
 import { createSessionFetch, isConnectionProbe } from './session-adapter.js';
+import { installMvuBridge } from './mvu-bridge.js';
 
 const EXTENSION_ID = 'opencode-adapter';
 let initialized = false;
@@ -14,6 +15,8 @@ let timer;
 let normalizing = false;
 let currentResult = null;
 const sessions = createSessionManager();
+const mvuSessions = createSessionManager({ key: 'opencode_adapter_mvu_session' });
+const mvuSessionIds = new Map();
 
 function sessionsEnabled() {
     return active() && extension_settings.opencode_adapter?.manageSessions !== false;
@@ -33,6 +36,14 @@ async function prepareSession(data) {
     if (!sessionsEnabled() || data?.chat_completion_source !== 'custom'
         || resolveOpenCodeUrl(data.custom_url)?.plan !== 'go' || isConnectionProbe(data)) return;
     const context = getContext();
+    // MVU's scoped wrapper has already selected an independent session and key.
+    const headers = data.custom_include_headers?.trim() ? yaml.parse(data.custom_include_headers) : {};
+    const requestedId = headers && typeof headers === 'object'
+        ? Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-opencode-session')?.[1] : null;
+    if (mvuSessionIds.has(requestedId)) {
+        data[REQUEST_SESSION_KEY] = mvuSessionIds.get(requestedId);
+        return;
+    }
     const session = sessions.prepare(context);
     data[REQUEST_SESSION_KEY] = { id: session.id, persistent: session.persistent };
     if (session.changed) await context.saveMetadata();
@@ -126,7 +137,7 @@ export function init() {
     box.id = 'oc-adapter-panel';
     box.hidden = true;
     box.innerHTML = `
-        <div class="oc-adapter-title">OpenCode 连接助手 <small>0.2.0</small></div>
+        <div class="oc-adapter-title">OpenCode 连接助手 <small>0.3.0</small></div>
         <div class="oc-adapter-controls">
             <label for="oc-adapter-plan">使用方式</label>
             <select id="oc-adapter-plan" aria-label="OpenCode 使用方式">
@@ -139,6 +150,8 @@ export function init() {
         <div id="oc-adapter-model-info"></div>
         <label><input type="checkbox" id="oc-adapter-manage-sessions">按聊天管理 Go 会话 ID</label>
         <div id="oc-adapter-session-info" role="status"></div>
+        <label><input type="checkbox" id="oc-adapter-mvu-enabled">适配 MVU 独立 API</label>
+        <div id="oc-adapter-mvu-info" role="status">等待 MVU 框架载入。</div>
         <small>同一聊天复用会话，分支和新聊天使用新会话；临时聊天在本页复用，独立扩展请求每次建立临时会话。自动会话开启时覆盖本次生成的 x-opencode-session，不改写预设。</small>
         <small>列表来自官方公开目录，不代表密钥或订阅已验证；生成仍使用酒馆保存的 API 密钥。仅填写域名时默认 Go。</small>`;
     document.getElementById('custom_api_url_text').insertAdjacentElement('afterend', box);
@@ -164,12 +177,39 @@ export function init() {
         onSent({ id, persistent, ok }) {
             const target = document.getElementById('oc-adapter-session-info');
             if (target && currentRoute()?.plan === 'go') {
-                target.textContent = `最近请求：${persistent ? '聊天会话' : '临时会话'} ${id}${ok ? '' : '（请求失败）'}`;
+                target.textContent = `最近请求：${mvuSessionIds.has(id) ? 'MVU 会话' : persistent ? '聊天会话' : '临时会话'} ${id}${ok ? '' : '（请求失败）'}`;
             }
         },
         onError: message => { toastr.error(message, 'OpenCode 连接助手'); },
     });
     document.getElementById('oc-adapter-manage-sessions').checked = sessionsEnabled();
+    const mvuEnabled = () => active() && extension_settings.opencode_adapter?.enableMvu !== false;
+    document.getElementById('oc-adapter-mvu-enabled').checked = mvuEnabled();
+    $('#oc-adapter-mvu-enabled').on('change.opencodeAdapter', function () {
+        extension_settings.opencode_adapter ??= {};
+        extension_settings.opencode_adapter.enableMvu = this.checked;
+        saveSettingsDebounced();
+        document.getElementById('oc-adapter-mvu-info').textContent = this.checked ? 'MVU 适配已开启。' : 'MVU 适配已关闭。';
+    });
+    installMvuBridge({
+        enabled: mvuEnabled,
+        parseYaml: value => yaml.parse(value),
+        async getSession() {
+            if (!sessionsEnabled()) return null;
+            const context = getContext();
+            const session = mvuSessions.prepare(context);
+            const marker = { id: session.id, persistent: session.persistent };
+            mvuSessionIds.set(session.id, marker);
+            if (session.changed) await context.saveMetadata();
+            return marker;
+        },
+        onAttached() { document.getElementById('oc-adapter-mvu-info').textContent = 'MVU 独立 API 适配已就绪；请在 MVU 中获取模型列表。'; },
+        onResult(result) {
+            document.getElementById('oc-adapter-mvu-info').textContent = result.ok
+                ? `MVU 已取得 ${result.models.length} 个 OpenCode 聊天模型。`
+                : result.message;
+        },
+    });
     $('#oc-adapter-manage-sessions').on('change.opencodeAdapter', function () {
         extension_settings.opencode_adapter ??= {};
         extension_settings.opencode_adapter.manageSessions = this.checked;
@@ -181,7 +221,9 @@ export function init() {
     eventSource.on(event_types.CHAT_RENAMED, async event => {
         if (!active()) return;
         const context = getContext();
-        if (sessions.renamed(context, event)) await context.saveMetadata();
+        const renamed = sessions.renamed(context, event);
+        const mvuRenamed = mvuSessions.renamed(context, event);
+        if (renamed || mvuRenamed) await context.saveMetadata();
         showSession();
     });
 

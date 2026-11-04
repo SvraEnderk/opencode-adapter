@@ -7,7 +7,7 @@
   "css": "style.css",
   "author": "Enderia",
   "homePage": "https://github.com/SvraEnderk/opencode-adapter",
-  "version": "0.2.0",
-  "description": "自动加载 OpenCode 模型，按聊天管理 Go 会话 ID，隔离新聊天、分支与独立请求。",
+  "version": "0.3.0",
+  "description": "自动加载 OpenCode 模型，管理 Go 聊天会话，并适配 MVU 独立 API 的模型目录和额外解析。",
   "hooks": { "activate": "init" }
 }
